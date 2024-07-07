@@ -1,0 +1,148 @@
+
+Explicación del Código:
+
+La función xTaskCreate se declara en FreeRTOS como:
+    BaseType_t xTaskCreate
+    (
+        TaskFunction_t pvTaskCode,
+        const char * const pcName,
+        const configSTACK_DEPTH_TYPE usStackDepth,
+        void * const pvParameters,
+        UBaseType_t uxPriority,
+        TaskHandle_t * const pxCreatedTask
+    );
+        1. pvTaskCode (primer parámetro)
+            Descripción: Es un puntero a la función que implementa la tarea. Esta función debe tener la firma void (*)(void *), es decir, 
+            una función que recibe un void* y no devuelve nada.
+            En nuestro código: &print_messages
+            print_messages es la función que se ejecutará como la tarea. Se pasa la dirección de esta función (&) para que FreeRTOS pueda llamarla.
+        2. pcName (segundo parámetro)
+            Descripción: Es un nombre descriptivo para la tarea. Este nombre se utiliza solo para fines de depuración y registro.
+            En tu código: "print_messages_task"
+            "print_messages_task" es un nombre descriptivo dado a la tarea. Ayuda a identificar la tarea en los registros de depuración.
+        3. usStackDepth (tercer parámetro)
+            Descripción: Define el tamaño de la pila en palabras (no bytes) que se asigna a la tarea. Cada palabra generalmente es de 4 bytes en la 
+            mayoría de las arquitecturas, incluido ESP32.
+            En nuestro código: 2048
+            2048 palabras de pila son asignadas a la tarea. Esto equivale a 8192 bytes (2048 * 4). La cantidad de memoria de pila depende de las 
+            necesidades de la tarea, como cuántas variables locales y llamadas de función maneja.
+        4. pvParameters (cuarto parámetro)
+            Descripción: Es un puntero que se pasa a la tarea como argumento. Puede ser usado para pasar datos a la tarea.
+            En nuestro código: NULL
+            NULL indica que no se están pasando parámetros a la función print_messages. Si tu tarea necesitara datos iniciales, podrías pasar un puntero a estos datos aquí.
+        5. uxPriority (quinto parámetro)
+            Descripción: Define la prioridad de la tarea. Las tareas con mayor prioridad tienen preferencia de ejecución.
+            En nuestro código: 5
+            5 es la prioridad asignada a esta tarea. FreeRTOS usa una política de prioridades en donde tareas con prioridad más alta se ejecutan antes
+            que las de menor prioridad. Prioridades relativas son usadas para balancear cargas de trabajo.
+        6. pxCreatedTask (sexto parámetro)
+            Descripción: Es un puntero donde se almacena el handle de la tarea creada. Este handle se puede usar para interactuar con la tarea (por ejemplo, 
+            suspenderla, cambiar su prioridad).
+            En nuestro código: NULL
+            NULL significa que no se almacenará el handle de la tarea. Si necesitas manejar o modificar la tarea después de crearla, podrías pasar un 
+            puntero a una variable del tipo TaskHandle_t aquí.
+    
+    void print_messages(void *pvParameter)
+
+        void *pvParameter
+
+            void * -> n C, void * es un puntero genérico que puede apuntar a cualquier tipo de dato. No tiene un tipo específico, por lo que puede ser usado para cualquier dato.
+            
+            pvParameter -> pv es una convención en el estilo de codificación de FreeRTOS que indica "puntero a void".
+        
+        Propósito de pvParameter:
+
+            Cuando creas una tarea con xTaskCreate, puedes pasar un puntero a datos específicos que la tarea puede usar durante su ejecución. 
+            Estos datos son accesibles en la tarea a través de pvParameter.
+
+        Ejemplo Práctico
+            Imaginemos que tienes una estructura de datos y deseas pasarla a tu tarea para que la use. A continuación, te mostraré cómo hacerlo:
+
+            Definición de una estructura
+            Supongamos que tienes la siguiente estructura:
+
+                typedef struct 
+                {
+                    int message_id;
+                    const char *message;
+                } MessageData;
+            
+            La función de la tarea ahora puede usar pvParameter para acceder a los datos pasados:
+
+            void print_custom_message(void *pvParameter)
+            {
+                // Castear pvParameter al tipo correcto
+                MessageData *data = (MessageData *) pvParameter;
+
+                // Usar los datos
+                while (1) {
+                    ESP_LOGI("my_app", "Mensaje ID #%d: %s", data->message_id, data->message);
+                    vTaskDelay(2000 / portTICK_PERIOD_MS); // Espera 2 segundos
+                }
+            }
+            Al crear la tarea, pasamos un puntero a la estructura:
+
+            void app_main(void) {
+                // Crear y llenar la estructura de datos
+                static MessageData message_data = {1, "Este es un mensaje personalizado."};
+
+                // Crear la tarea y pasar el puntero a message_data
+                xTaskCreate(&print_custom_message, "print_custom_message_task", 2048, &message_data, 5, NULL);
+            }
+        
+        Explicación paso a paso
+            Definición de la estructura (MessageData):
+
+            Define los datos que deseas pasar a la tarea.
+            Función de la tarea (print_custom_message):
+
+            Castea ((MessageData *) pvParameter) el puntero pvParameter al tipo de la estructura que esperas.
+            Usa los datos de la estructura en la lógica de la tarea.
+            Creación de la tarea (xTaskCreate):
+
+            Pasa un puntero a la estructura de datos como el cuarto parámetro (&message_data).
+            Importancia del Casting:
+            El pvParameter es un puntero a void, lo que significa que debes convertirlo al tipo de dato correcto dentro de la tarea. Esto se hace utilizando un "cast" explícito:
+                MessageData *data = (MessageData *) pvParameter;
+            Este casting le dice al compilador que pvParameter apunta a un MessageData y te permite acceder a los datos de la estructura de manera segura.
+
+    Ejemplo Completo
+
+    #include <stdio.h>
+    #include "freertos/FreeRTOS.h"
+    #include "freertos/task.h"
+    #include "esp_log.h"
+
+    // Definir un tag para los logs
+    static const char *TAG = "my_app";
+
+    // Definir la estructura de datos
+    typedef struct {
+        int message_id;
+        const char *message;
+    } MessageData;
+
+    // Función que imprime mensajes personalizados
+    void print_custom_message(void *pvParameter) {
+        MessageData *data = (MessageData *) pvParameter;
+        while (1) {
+            ESP_LOGI(TAG, "Mensaje ID #%d: %s", data->message_id, data->message);
+            vTaskDelay(2000 / portTICK_PERIOD_MS); // Espera 2 segundos
+        }
+    }
+
+    void app_main(void) {
+        // Crear y llenar la estructura de datos
+        static MessageData message_data = {1, "Este es un mensaje personalizado."};
+
+        // Crear la tarea y pasar el puntero a message_data
+        xTaskCreate(&print_custom_message, "print_custom_message_task", 2048, &message_data, 5, NULL);
+    }
+  
+    Resumen:
+    
+        void *pvParameter permite a una tarea recibir datos cuando se crea.
+        Castear el puntero en la tarea permite acceder a estos datos con el tipo correcto.
+        Flexibilidad: Puedes pasar cualquier tipo de datos a una tarea usando esta técnica.
+    
+    Esta técnica es muy poderosa para escribir tareas de FreeRTOS que necesitan trabajar con datos específicos de manera concurrente.
