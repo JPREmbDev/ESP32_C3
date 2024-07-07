@@ -1,0 +1,125 @@
+static void IRAM_ATTR button_isr_handler(void* arg)
+
+La función button_isr_handler es una Interrupción de Servicio de Rutina (ISR) diseñada para manejar eventos de pulsación del botón en un microcontrolador ESP32. Esta ISR se ejecuta cada vez que se detecta un evento específico (en este caso, la pulsación del botón). Aquí hay una explicación detallada de cada parte del código:
+
+static void IRAM_ATTR button_isr_handler(void* arg)
+    static: Indica que esta función es de alcance local al archivo, lo que significa que no se puede llamar desde otros archivos.
+    IRAM_ATTR: Una macro de ESP-IDF que coloca la función en la memoria de instrucciones interna (IRAM) para un acceso rápido, ya que las ISR deben ser rápidas y eficientes.
+    void* arg: Argumento genérico que se pasa a la ISR cuando se llama, típicamente usado para pasar datos a la ISR. En este caso, no se está usando (NULL).
+    Cuerpo de la Función
+        
+        button_press_count = button_press_count + 1;
+        volatile int button_press_count: Este contador, declarado como volatile, mantiene el número de veces que el botón ha sido pulsado.
+        Incremento: Se realiza el incremento del contador de manera explícita para evitar problemas de concurrencia y garantizar que la operación sea atómica.
+    
+    Cambio del Estado del LED
+
+        led_on = !led_on;
+        gpio_set_level(LED_PIN, led_on);
+        led_on: Variable volatile bool que almacena el estado del LED (encendido o apagado).
+        led_on = !led_on;: Invierte el estado actual del LED. Si estaba apagado, se enciende, y viceversa.
+        gpio_set_level(LED_PIN, led_on);: Configura el pin del LED al nivel lógico correspondiente. Esto enciende o apaga el LED físicamente.
+    
+    Registro en el Log
+
+        if (led_on) {
+            ESP_EARLY_LOGI(TAG, "LED Encendido (Pulsado #%d)", button_press_count);
+        } else {
+            ESP_EARLY_LOGI(TAG, "LED Apagado (Pulsado #%d)", button_press_count);
+        }
+            
+            ESP_EARLY_LOGI: Función de logging que imprime mensajes a la consola de forma segura desde la ISR. Utilizamos ESP_EARLY_LOGI en lugar de 
+            ESP_LOGI para asegurar que el mensaje se registre de manera rápida y segura en el contexto de la ISR.
+            Condicional: Determina si el LED está encendido o apagado.
+            Mensaje de Log: Imprime un mensaje indicando si el LED está encendido o apagado junto con el número de pulsaciones del botón.
+
+
+    Explicación Adicional
+        
+        ¿Por qué volatile?
+            
+            volatile: Es importante porque button_press_count y led_on pueden ser modificados en el contexto de la ISR, y volatile le dice al compilador
+            que debe siempre leer estas variables directamente de la memoria y no optimizarlas o guardarlas en registros, evitando posibles inconsistencias.
+
+        ¿Por qué IRAM_ATTR?
+            
+            IRAM_ATTR: ISR necesita ejecutarse rápidamente, y colocar la función en IRAM asegura un acceso más rápido y eficiente en comparación con la memoria flash.
+
+        Consideraciones de Concurrencia
+            
+            Acceso Atómico: Aunque el ESP32 no tiene soporte completo para operaciones atómicas en todos los tipos de datos, el simple incremento de un int se 
+            maneja de manera adecuada en la mayoría de los casos simples. En sistemas más complejos o críticos, podrías considerar técnicas adicionales para 
+            asegurar la atomicidad completa.
+
+
+    Código de Contexto Completo
+    Para comprender cómo se integra esta ISR en el programa, aquí está el contexto completo:
+
+        #include <stdio.h>
+        #include "freertos/FreeRTOS.h"
+        #include "freertos/task.h"
+        #include "driver/gpio.h"
+        #include "esp_log.h"
+
+        // Definiciones para el LED y el Pulsador
+        #define LED_PIN GPIO_NUM_2
+        #define BUTTON_PIN GPIO_NUM_0
+
+        // Variables globales
+        static const char *TAG = "LED_BUTTON_APP";
+        volatile bool led_on = false;
+        volatile int button_press_count = 0;
+
+        // ISR del pulsador
+        static void IRAM_ATTR button_isr_handler(void* arg) {
+            // Incrementar el contador de pulsaciones de manera explícita
+            button_press_count = button_press_count + 1;
+
+            // Cambiar el estado del LED
+            led_on = !led_on;
+            gpio_set_level(LED_PIN, led_on);
+
+            // Registro en el log
+            if (led_on) {
+                ESP_EARLY_LOGI(TAG, "LED Encendido (Pulsado #%d)", button_press_count);
+            } else {
+                ESP_EARLY_LOGI(TAG, "LED Apagado (Pulsado #%d)", button_press_count);
+            }
+        }
+
+        void app_main(void) {
+            // Configurar el LED
+            gpio_config_t io_conf;
+            io_conf.intr_type = GPIO_INTR_DISABLE;    // Sin interrupciones para el LED
+            io_conf.mode = GPIO_MODE_OUTPUT;          // Modo de salida
+            io_conf.pin_bit_mask = (1ULL << LED_PIN); // Pines seleccionados
+            io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+            io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+            gpio_config(&io_conf);
+
+            // Configurar el pulsador
+            io_conf.intr_type = GPIO_INTR_NEGEDGE;    // Interrupción en el borde de bajada
+            io_conf.mode = GPIO_MODE_INPUT;           // Modo de entrada
+            io_conf.pin_bit_mask = (1ULL << BUTTON_PIN); // Pines seleccionados
+            io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+            io_conf.pull_up_en = GPIO_PULLUP_ENABLE;  // Activar pull-up
+            gpio_config(&io_conf);
+
+            // Instalar el servicio de ISR
+            gpio_install_isr_service(0);
+            // Añadir ISR para el pulsador
+            gpio_isr_handler_add(BUTTON_PIN, button_isr_handler, NULL);
+
+            ESP_LOGI(TAG, "Configuración completa. LED_PIN: %d, BUTTON_PIN: %d", LED_PIN, BUTTON_PIN);
+
+            // Bucle principal vacío ya que todo se maneja por la ISR
+            while (1) {
+                vTaskDelay(pdMS_TO_TICKS(1000)); // Evita que el CPU se quede ocioso
+            }
+        }
+    Resumen
+    
+    Incremento de button_press_count: Se hace de manera explícita para evitar problemas con volatile.
+    Cambio de led_on: Controla el estado del LED.
+    Logging: Informa el estado del LED y cuántas veces se ha pulsado el botón.
+    IRAM_ATTR: Optimiza la ISR para una respuesta rápida.
